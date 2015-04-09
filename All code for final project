@@ -1,0 +1,465 @@
+---
+title: "Code used for Final Project"
+author: "Fatima Rehman"
+date: "27 March 2015"
+output: html_document
+---
+
+<!-- 
+  Comments in rmarkdown look like this
+  There are also comments in the code chunks which are the lines that start with a #
+-->
+
+```{r setup,echo=FALSE,results="hide",warning=FALSE,message=FALSE}
+#This following piece of code was taken straight from Dr Schofields workshop markdown files
+#
+options(width = 100)
+# source bioconductor so it can install any missing packages
+source("http://bioconductor.org/biocLite.R")
+# set up the paths
+fileName <- "Workshop2"
+if(!require(ggplot2)) install.packages("ggplot2")
+if(!require(reshape2)) install.packages("reshape2")
+if(!require(plyr)) install.packages("plyr")
+if(!require(Gviz)) biocLite("Gviz")
+if(!require(seqTools)) biocLite("seqTools")
+if(!require(edgeR)) biocLite("edgeR")
+if(!require(GenomicAlignments)) biocLite("GenomicAlignments")
+if(!require(Rsubread)) biocLite("Rsubread")
+setwd("~/.")
+resDir <- "/usr/local/share/assignment/fullFC.RData/"
+locDir <- paste0(getwd(),"/BS32010/")
+outDir <- locDir
+imgDir <- locDir
+imgURL <- "http://www.compbio.dundee.ac.uk/user/pschofield/Teaching/BS32010/figures/"
+if(!file.exists(locDir)) dir.create(locDir)
+```
+
+# Reminder
+
+
+##Data format (fastq)
+#Taken from Dr Schofield's workshop markdown files
+```{r chunk2, echo=FALSE,comment=NA}
+fq <- readLines(paste0(resDir,"example.fq"))
+out <- head(unname(sapply(fq,function(x) substr(x,1,min(70,nchar(x))))),16)
+writeLines(out)
+```
+
+
+
+## Quality Assessment
+#Taken from Dr Schofield's workshop markdown files
+- Commandline tools such as `FastQC` and `fastx-toolkit`
+- Bioconductor tools `seqtools` and `ShortRead`
+```{r chunk3, results="hide",warning=FALSE,message=FALSE}
+# load the seqTools package
+require(seqTools)
+# run the fastqq function to calculate the quality scores
+fqFile <- paste0(resDir,"WT_1_R1.fq.gz")
+fqc <- fastqq(fqFile)
+# create an image file device to save the plot to
+phredPlot <- paste0(outDir,"phredPlot.png")
+png(phredPlot,width=800,height=500)
+# plot the phred quality scores and close the device
+plotPhredQuant(fqc, 1, "Phred quantiles for 1st file")
+dev.off()
+```
+
+## Vizualise Quality
+![The distribution of phred scores per base for sample of reads ](`r phredPlot`)
+
+## Quality Filtering
+- There a many tools for filtering fastq files 
+    - remove low quality reads
+    - trim poor quality bases from reads
+    - remove adaptor sequence
+- Commandline tools such as `picard`, `fastx-toolkit` and `trimmomatic`
+- Bioconductor packages: again `seqTools` and `ShortRead`
+#Taken from Dr Schofield's workshop markdown files
+```{r chunk4,echo=FALSE}
+oFile <- paste0(outDir,"keep.fq.gz")
+dFile <- paste0(outDir,"disc.fq.gz")
+```
+
+## Pair Filtering
+#Taken from Dr Schofield's workshop markdown files
+- Aligners expect matching reads
+    - although reads have pair identifiers aligners do not use these thay assume the files are
+      in matching order
+    - If you drop a read from one file you must drop its pair from the other
+```{r chunk5}
+trimFastq(fqFile, outfile=oFile, discard=dFile, qualDiscard=10, qualMask=15,
+          fixTrimLeft=2, fixTrimRight=2, qualTrimLeft=28, qualTrimRight=30, minSeqLen=5)
+```
+
+## Alignment
+![Trapnell & Salzberg Nature Biotechnology (2009)](`r paste0(imgURL,'nbt0509-455-F2.jpg')`)
+
+## Alignment
+#Taken from Dr Schofield's workshop markdown files
+- Splice aware aligner (again many)
+    - `subread`, `subjunc`, `tophat`, `star`...
+- Reference genome index
+    - build from a fasta for the specific aligner
+- Annotation file 
+    - optional depending on the aligner used to influence alignment
+- Read file(s)
+    - fastq file(s), either one single end reads or two for paired end reads
+
+## `Rsubread`
+#Taken from Dr Schofield's workshop markdown files
+- R bioconductor provides wrappers for several aligners
+    - some more convenient than others
+- For simplicity I will focus on `Rsubread`
+- Two aligners
+    - subread-align / align() 
+    - subjunc / subjunc() 
+- Break read up into small pieces
+    - alignes the pieces
+    - region where most pieces align "voted" as the read location
+
+## Loading Rsubread
+#Taken from Dr Schofield's workshop markdown files
+```{r chunk7, eval=FALSE}
+# Load the package
+require("Rsubread")
+
+# See what recipie files are available
+vignette("Rsubread")
+
+# In the case of Rsubread and edgeR there are extensive manuals also
+RsubreadUsersGuide()
+```
+
+```{r chunk8a, echo=FALSE}
+# This chunk is here for completeness I create a subdirectory to do all the work in
+# and change location to the directory
+if(!file.exists(paste0(locDir,"/BS32010_rnaseq"))) dir.create(paste0(locDir,"/BS32010_rnaseq"))
+setwd(paste0(locDir,"/BS32010_rnaseq"))
+```
+
+## Build an Index
+#Taken from Dr Schofield's workshop markdown files
+- Download the genomic reference in FASTA for your species form 
+```{r chunk8, eval=FALSE, results="hide", message=FALSE, warning=FALSE}
+# R.utils package for the download.file() function
+require(R.utils)
+if(!file.exists(paste0(locDir,"/BS32010_rnaseq"))) dir.create(paste0(locDir,"/BS32010_rnaseq"))
+setwd(paste0(locDir,"/BS32010_rnaseq"))
+# specify the location of the yeast genome file on the ENSEMBL ftp server
+faURL <- "ftp://ftp.ensembl.org/pub/release-78/fasta/saccharomyces_cerevisiae/"
+faURL <- paste0(faURL,"dna/Saccharomyces_cerevisiae.R64-1-1.dna.toplevel.fa.gz")
+# give a slightly nicer local file name
+faFile <- paste0(locDir,"BS32010_rnaseq/Scerevisiae_R64.fa")
+download.file(faURL, paste0(faFile,".gz"))
+indexName <- paste0(locDir,"BS32010_rnaseq/Scerevisiae_R64")
+if(!file.exists(faFile)) gunzip(paste0(faFile,".gz"))
+buildindex(basename=indexName,reference=faFile)
+```
+
+## Align paired end files
+#Taken from Dr Schofield's workshop markdown files
+- For paired reads either 2 files or interleaved
+    - paired reads must be kept as pairs 
+    - aligners are generally not pair aware
+
+```{r chunk10, eval=FALSE, results="hide", message=FALSE, warning=FALSE}
+# setup the paired read files
+reads1 <- paste0(resDir,"WT_1_R1.fq.gz")
+reads2 <- paste0(resDir,"WT_1_R2.fq.gz")
+# Align the reads to the reference index
+align(index=indexName, readfile1=reads1, readfile2=reads2, 
+      output_file=paste0(outDir,"WT_1U.BAM"))
+# sort and index the bam file with functions from Rsamtools package
+sfile <- sortBam(paste0(outDir,"WT_1U.BAM"),paste0(outDir,"WT_1"))
+indexBam(sfile)
+reads <- readGAlignments(sfile)
+```
+
+<!-- 
+    this chunk is used to align then sort and index the full set of 
+    yeast data to the full yeast index
+-->
+
+```{r chunk10a1,echo=FALSE,eval=FALSE}
+# Align all the fastqs in pairs
+fileStubs <- unique(sapply(list.files(resDir,pattern=".*gz"),
+                function(x) head(strsplit(x,"_R")[[1]],1)))
+mclapply(fileStubs,function(fs){
+  reads1 <- paste0(resDir,fs,"_R1.fq.gz")
+  reads2 <- paste0(resDir,fs,"_R2.fq.gz")
+  # Align the reads to the reference index
+  align(index=indexName, readfile1=reads1, readfile2=reads2, 
+      output_file=paste0(outDir,fs,"U.BAM"))
+  # sort and index the bam file
+  sfile <- sortBam(paste0(outDir,fs,"U.BAM"),paste0(outDir,fs))
+  indexBam(sfile)
+},mc.cores=8)
+```
+<!-- Finish -->
+
+## Aligned Reads
+#Taken from Dr Schofield's workshop markdown files
+```{r chunk11,comment=NA,echo=FALSE,message=FALSE,warning=FALSE}
+reads <- readGAlignments(paste0(outDir,"WT_1.bam"))
+reads
+```
+
+## Alignment Visualisation
+#Taken from Dr Schofield's workshop markdown files
+- Genome Browsers will normally import and display BAM files
+    - IGV, IGB, UCSC 
+```{r chunk12a, eval=FALSE}
+# load the Gviz package
+require(Gviz)
+# unfortunately we are using none UCSC naming 
+options(ucscChromosomeNames=FALSE)
+#make two tracks
+wtTrack <- AlignmentsTrack(paste0(resDir,"WT_1.bam"),isPaired=T,
+                           name="WT_1",chr="X",genome="sce3")
+snf2Track <- AlignmentsTrack(paste0(resDir,"Snf2_1.bam"),isPaired=T,
+                             name="Snf2_1",chr="X",genome="sce3")
+# and plot them
+plotTracks(c(wtTrack,snf2Track),chromosome="X",genome="sce3",from=2e4,to=5e4)
+```
+
+## Alignment Visualisation
+#Taken from Dr Schofield's workshop markdown files
+```{r chunk12b, fig.width=9, fig.height=5, fig.caption="Gviz plot of bamfile alignments",echo=FALSE}
+require(Gviz)
+options(ucscChromosomeNames=FALSE)
+wtTrack <- AlignmentsTrack(paste0(resDir,"WT_1.bam"),isPaired=T,
+                           name="WT_1",chr="X",genome="sce3")
+snf2Track <- AlignmentsTrack(paste0(resDir,"Snf2_1.bam"),isPaired=T,
+                             name="Snf2_1",chr="X",genome="sce3")
+# and plot them
+plotTracks(c(wtTrack,snf2Track),chromosome="X",genome="sce3",from=2e4,to=5e4)
+```
+
+##Assignment
+#Taken from Dr Schofield's workshop markdown files
+- Aligners produce alignments SAM BAM ALN formats
+- SAM/BAM are very common 
+    - samtools, sambamba software for manipulating 
+- There are several tools for read assignment
+    - commandline htseq-count and featureCounts, 
+- With-in Bioconductor 
+    - overlap functions in GenomicRanges, GenomicAlignments
+    - featureCounts in Rsubread
+
+## Annotation Tracks
+#Taken from Dr Schofield's workshop markdown files
+```{r chunk13b, }
+require(biomaRt)
+bm <- useMart(biomart="ensembl",dataset="scerevisiae_gene_ensembl")
+fm <- Gviz:::.getBMFeatureMap()
+biomTrack <- BiomartGeneRegionTrack(genome = "sce3", chromosome = "X", biomart=bm,
+                                    start = 2e4, end = 5e4, name = "ENSEMBL",shape="arrow",
+                                    showId=TRUE,transcriptAnnotation="gene")
+```
+
+##
+```{r chunk13c, fig.width=9,fig.height=5}
+plotTracks(c(wtTrack,snf2Track,biomTrack),chromosome="X",
+                  extend.left=-1000,genome="sce3",from=2e4,to=5e4)
+```
+
+## Assignment
+- Alignment 
+    - depending on tool (SAM, BAM, sorted index)
+- Annotation
+    - GTF, GFF, GenomicRanges
+- R/Subread package 
+    - featureCounts function
+
+## Get the annotations
+#Taken from Dr Schofield's workshop markdown files
+```{r chunk13d, eval=FALSE}
+faURL <- "ftp://ftp.ensembl.org/pub/release-78/gtf/saccharomyces_cerevisiae/"
+faURL <- paste0(faURL,"Saccharomyces_cerevisiae.R64-1-1.78.gtf.gz")
+# give a slightly nicer local file name
+gtfFile <- paste0(locDir,"BS32010_rnaseq/Scerevisiae_R64.gtf")
+# download and unzip the file
+download.file(faURL, paste0(gtfFile,".gz"))
+if(!file.exists(gtfFile)) gunzip(paste0(gtfFile,".gz"))
+```
+```{r chunk13e,echo=FALSE}
+gtfFile <- paste0(locDir,"BS32010_rnaseq/Scerevisiae_R64.gtf")
+```
+
+
+
+
+
+```{r}
+summary(fc) #This was used to display to give you a summary of the feature counts.
+```
+
+```{r}
+head(fc$counts) #This displayed the top counts
+head(fc$annotation) #This displayed the length of the strands
+condition <- as.factor(sapply(colnames(fc$counts),function(cn){ head(strsplit(cn,"_")[[1]],1)})) #This displayed the files in columns
+condition #Displays the above result
+condition<-c("S","S","W","W") #Made a matrix of the files
+condition #Displayed the Matrix
+condition <- as.factor(sapply(colnames(fc$counts),function(cn){ head(strsplit(cn,"_")[[1]],1)})) 
+condition <- relevel(condition,"WT")
+```
+
+```{r}
+dge <- DGEList(fc$counts,group=condition)
+plotMDS(dge)
+edgeRUsersGuide() #Loaded the edgeR user guide in order to plot the graphs
+```
+
+
+```{r}
+ndge <- calcNormFactors(dge)
+ndge <- estimateGLMCommonDisp(ndge,design)
+ndge <- estimateGLMTrendedDisp(ndge,design)
+ndge <- estimateGLMTagwiseDisp(ndge,design)
+nfit <- glmFit(ndge,design)
+nlrt <- glmLRT(nfit,coef=2)
+ntt <- topTags(nlrt,n=10000) #Ran  with normalisation
+```
+
+```{r}
+head(tt,200) #This displayed the first 200 genes, that were the most differentially expressed. Showing the gene ID, the logFC(feature counts) and logCPM(counts per million) value. It also showed the P-value and the FDR and LR value 
+```
+
+
+```{r}
+library(pvclust) 
+if(!exists("pvcl")){pvcl <- pvclust(fc$counts)} #Loaded in the package pvclust, which allowed cluster analysis
+plot(pvcl) #Plotted the graph to show cluster analysis
+plotMDS(dge) #Plotted the graph to show multidimensional scaling analysis.
+```
+
+
+## Get the annotations
+```{r chunk13d, eval=FALSE}
+faURL <- "ftp://ftp.ensembl.org/pub/release-78/gtf/saccharomyces_cerevisiae/"
+faURL <- paste0(faURL,"Saccharomyces_cerevisiae.R64-1-1.78.gtf.gz")
+# give a slightly nicer local file name
+gtfFile <- paste0(locDir,"BS32010_rnaseq/Scerevisiae_R64.gtf")
+# download and unzip the file
+download.file(faURL, paste0(gtfFile,".gz"))
+if(!file.exists(gtfFile)) gunzip(paste0(gtfFile,".gz"))
+```
+
+
+```{r chunk13e,echo=FALSE}
+gtfFile <- paste0(locDir,"BS32010_rnaseq/Scerevisiae_R64.gtf")
+```
+
+
+
+
+##Following code produces the phylogenetics tree
+
+
+```{r}
+install.packages("ape")
+install.packages("phangorn")
+install.packages("picante") #Installs the required packages
+require(ape)
+require(phangorn)
+require(piacnte)
+```
+
+
+
+
+```{r}
+x<-read.dna("YHR136C_dna.mfa",format="fasta") #The file name was changed for each gene
+d<-dist.dna(x)
+```
+
+```{r}
+##plotting stuff##
+njd<-nj(d)
+plot(njd)
+plot(njd,"f")
+plot(njd);nodelabels();tiplabels();edgelabels()
+plot(njd);nodelabels();add.scale.bar(length=0.001)
+plot(njd);nodelabels();axisPhylo(side=1)
+```
+
+```{r}
+##residuals from distance metrics##
+par(mfrow=c(2,3))
+tr.upgma<-upgma(d)
+dt.upgma<-cophenetic(tr.upgma)
+dmat<-as.matrix(d)
+nms<-rownames(dmat)
+dt.upgma<-dt.upgma[nms, nms]
+dt.upgma<-as.dist(dt.upgma)
+plot(dt.upgma-d,ylab="residuals",ylim=c(-0.05,0.05),cex=0.5,main="UPGMA")
+abline(h=0,lty=3)
+tr.wpgma<-wpgma(d)
+dt.wpgma<-cophenetic(tr.wpgma)
+dmat<-as.matrix(d)
+nms<-rownames(dmat)
+dt.wpgma<-dt.wpgma[nms, nms]
+dt.wpgma<-as.dist(dt.upgma)
+plot(dt.wpgma-d,ylab="residuals",ylim=c(-0.05,0.05),cex=0.5,main="WPGMA")
+abline(h=0,lty=3)
+```
+
+```{r}
+tr.nj<-nj(d)
+dt.nj<-cophenetic(tr.nj)
+dmat<-as.matrix(d)
+nms<-rownames(dmat)
+dt.nj<-dt.nj[nms, nms]
+dt.nj<-as.dist(dt.nj)
+plot(dt.nj-d,ylab="residuals",ylim=c(-0.05,0.05),cex=0.5,main="Neighbour-joined")
+abline(h=0,lty=3)
+```
+
+```{r}
+tr.bionj<-bionj(d)
+dt.bionj<-cophenetic(tr.bionj)
+dt.bionj<-dt.bionj[nms, nms]
+dt.bionj<-as.dist(dt.bionj)
+plot(dt.bionj-d,ylab="residuals",ylim=c(-0.05,0.05),cex=0.5,main="BIONJ")
+abline(h=0,lty=3)
+tr.fastme<-fastme.bal(d,nni=T,spr=T,tbr=T)
+dt.fastme<-cophenetic(tr.fastme)
+dt.fastme<-dt.fastme[nms, nms]
+dt.fastme<-as.dist(dt.fastme)
+plot(dt.fastme,ylab="residuals",ylim=c(-0.05,0.05),cex=0.5,main="FastME.BAL")
+abline(h=0,lty=3)
+```
+
+
+```{r}
+tr.fastme2<-fastme.ols(d,nni=T)
+dt.fastme2<-cophenetic(tr.fastme2)
+dt.fastme2<-dt.fastme2[nms, nms]
+dt.fastme2<-as.dist(dt.fastme2)
+plot(dt.fastme,ylab="residuals",ylim=c(-0.05,0.05),cex=0.5,main="FastME.OLS")
+abline(h=0,lty=3)
+```
+
+
+```{r}
+dm<-dist.dna(x)
+tree<-NJ(dm)
+fit=pml(tree,as.phyDat(x))
+fit=optim.pml(fit,T)
+bs<-bootstrap.pml(fit,bs=100,optNni=T) #bs=? is the number of bootstraps
+treeBS<-plotBS(fit$tree,type="fan",bs,no.margin=T)
+treeBS<-plotBS(fit$tree,type="phylogram",bs,no.margin=T);add.scale.bar(length=0.001)
+```
+
+
+
+
+
+
+
+
+
+
