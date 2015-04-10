@@ -1,5 +1,7 @@
 ##Bioinformatics Final Report 
 
-Phylogentic tree code - contains the code used in R-Studio to create the DNA phylogenetic trees
+#Differential Expression Analysis
+Contains the code used in R-Studio to carry out differential expression analysis
 
-Differential Expression Analysis - contains the code used in R-Studio to carry out differential expression analysis
+#Phylogentic Tree Code
+Contains the code used in R-Studio to create the DNA phylogenetic trees
